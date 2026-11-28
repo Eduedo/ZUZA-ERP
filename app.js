@@ -250,9 +250,9 @@ window.onClienteChange = function() {
     }
     if (match.destino_habitual && !document.getElementById('cmd-obs').value) {
       document.getElementById('cmd-obs').value = match.destino_habitual;
-      updateDescriptorPreview();
     }
   }
+  updateDescriptorPreview();
 };
 
 window.updateDescriptorPreview = function() {
@@ -266,6 +266,15 @@ window.updateDescriptorPreview = function() {
 
   const descriptor = `${tipoServ} ${textoFecha} ${oc} ${obs} ${eta}`.replace(/\s+/g, ' ').trim();
   document.getElementById('cmd-descriptor-preview').textContent = descriptor;
+
+  // Actualizar datos de confirmación en el Resumen
+  const cliente = document.getElementById('cmd-cliente').value.trim();
+  const tipoDoc = document.getElementById('cmd-tipo-doc').value;
+  document.getElementById('sum-oc-badge').textContent = oc || 'ZRA-';
+  document.getElementById('sum-cliente').textContent = cliente || 'Sin definir';
+  document.getElementById('sum-entrega').textContent = fechaEnt ? `${textoFecha}${hora ? ' • ' + hora + ' hrs' : ''}` : 'Sin fecha';
+  document.getElementById('sum-obs').textContent = obs || 'Sin especificar';
+  document.getElementById('sum-doc').textContent = tipoDoc;
 };
 
 window.quickAddItem = function(txt, pxq, ume) {
@@ -331,8 +340,8 @@ window.addItemRow = function(prefill = {}, autoFocus = false) {
     if (prod) {
       pxqInput.value = prod.pxq;
       umeInput.value = prod.ume;
-      recalcTotals();
     }
+    recalcTotals();
   });
 
   [pxqInput, qtyInput, umeInput].forEach(el => el.addEventListener('input', recalcTotals));
@@ -349,11 +358,14 @@ window.addItemRow = function(prefill = {}, autoFocus = false) {
 };
 
 function recalcTotals() {
-  const rows = document.querySelectorAll('#cmd-items-body .item-row');
+  const rows = Array.from(document.querySelectorAll('#cmd-items-body .item-row'));
   let sumValor = 0;
   let sumRedondeo = 0;
+  let activeItems = [];
 
-  rows.forEach(tr => {
+  rows.forEach((tr, idx) => {
+    const txt = tr.querySelector('.item-txt').value.trim();
+    const ume = tr.querySelector('.item-ume').value;
     const pxq = Number(tr.querySelector('.item-pxq').value) || 0;
     const qty = Number(tr.querySelector('.item-qty').value) || 0;
     const neto = calcNetoUnit(pxq);
@@ -365,17 +377,94 @@ function recalcTotals() {
 
     sumValor += valor;
     sumRedondeo += red;
+
+    if (txt || valor > 0) {
+      activeItems.push({ idx, txt: txt || 'Ítem sin nombre', ume, qty, red });
+    }
   });
 
   const netoTotal = sumRedondeo / 1.19;
   const ivaTotal = sumRedondeo - netoTotal;
 
-  document.getElementById('sum-items').textContent = rows.length;
+  document.getElementById('sum-items').textContent = activeItems.length;
   document.getElementById('sum-neto').textContent = formatCLP(netoTotal);
   document.getElementById('sum-iva').textContent = formatCLP(ivaTotal);
   document.getElementById('sum-valor').textContent = formatCLP(sumValor);
   document.getElementById('sum-redondeo').textContent = formatCLP(sumRedondeo);
+
+  const listEl = document.getElementById('sum-items-list');
+  if (activeItems.length === 0) {
+    listEl.innerHTML = '<div class="py-3 text-center text-xs text-slate-400">Sin artículos aún</div>';
+  } else {
+    listEl.innerHTML = activeItems.map(it => `
+      <div class="py-2 flex items-center justify-between gap-2 text-xs">
+        <div class="min-w-0 flex-1">
+          <div class="font-semibold text-slate-800 truncate">${it.qty} ${it.ume} × ${it.txt}</div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="font-bold text-slate-900">${formatCLP(it.red)}</span>
+          <button type="button" onclick="removeItemByIndex(${it.idx})" title="Descartar artículo" class="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    `).join('');
+  }
 }
+
+window.removeItemByIndex = function(idx) {
+  const rows = document.querySelectorAll('#cmd-items-body .item-row');
+  if (rows[idx]) {
+    rows[idx].remove();
+    recalcTotals();
+  }
+};
+
+window.copyResumenWhatsApp = function() {
+  const oc = document.getElementById('cmd-oc').value.trim().toUpperCase();
+  const cliente = document.getElementById('cmd-cliente').value.trim() || 'Cliente';
+  const fechaEnt = document.getElementById('cmd-fecha-entrega').value;
+  const hora = document.getElementById('cmd-eta-hora').value;
+  const obs = document.getElementById('cmd-obs').value.trim();
+  const total = document.getElementById('sum-redondeo').textContent;
+  const textoFecha = formatTextoFecha(fechaEnt);
+
+  const rows = Array.from(document.querySelectorAll('#cmd-items-body .item-row'));
+  const lineas = rows.map(tr => {
+    const txt = tr.querySelector('.item-txt').value.trim();
+    const ume = tr.querySelector('.item-ume').value;
+    const qty = Number(tr.querySelector('.item-qty').value) || 0;
+    const pxq = Number(tr.querySelector('.item-pxq').value) || 0;
+    const red = roundToHundred(pxq * qty);
+    if (!txt) return null;
+    return `• ${qty} ${ume} ${txt}: ${formatCLP(red)}`;
+  }).filter(Boolean);
+
+  if (lineas.length === 0) {
+    showToast('Agrega al menos un producto para copiar el resumen.', true);
+    return;
+  }
+
+  const msg = [
+    `*CONFIRMACIÓN DE PEDIDO ${oc}*`,
+    `👤 *Cliente:* ${cliente}`,
+    `📅 *Entrega:* ${textoFecha}${hora ? ` - ${hora} hrs` : ''}`,
+    obs ? `📍 *Lugar:* ${obs}` : null,
+    ``,
+    `*Detalle:*`,
+    ...lineas,
+    ``,
+    `💰 *Total:* ${total}`
+  ].filter(v => v !== null).join('\n');
+
+  navigator.clipboard.writeText(msg).then(() => {
+    showToast('Resumen de confirmación copiado para WhatsApp.');
+  }).catch(() => {
+    showToast('No se pudo copiar automáticamente.', true);
+  });
+};
 
 window.saveComanda = async function() {
   const oc = document.getElementById('cmd-oc').value.trim().toUpperCase();

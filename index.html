@@ -74,7 +74,7 @@
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Nº Pedido (OC)</label>
-                <input id="cmd-oc" type="text" class="input-field font-bold text-amber-700 bg-amber-50/50" />
+                <input id="cmd-oc" type="text" class="input-field font-bold text-amber-700 bg-amber-50/50" oninput="updateDescriptorPreview()" />
               </div>
               <div>
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Fecha Pedido</label>
@@ -82,7 +82,7 @@
               </div>
               <div>
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Tipo Documento</label>
-                <select id="cmd-tipo-doc" class="input-field">
+                <select id="cmd-tipo-doc" class="input-field" onchange="updateDescriptorPreview()">
                   <option value="Factura">Factura</option>
                   <option value="Boleta">Boleta</option>
                   <option value="Factura Mensual">Factura Mensual</option>
@@ -179,36 +179,68 @@
         <!-- Summary Column -->
         <div class="space-y-5">
           <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm sticky top-28">
-            <h3 class="text-base font-bold text-slate-900 mb-4 pb-3 border-b border-slate-100">Resumen de Comanda</h3>
+            <div class="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-slate-100">
+              <h3 class="text-base font-bold text-slate-900">Resumen de Comanda</h3>
+              <span id="sum-oc-badge" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">ZRA-291</span>
+            </div>
 
-            <div class="space-y-2.5 text-sm">
-              <div class="flex justify-between text-slate-600">
-                <span>Ítems cargados:</span>
-                <span id="sum-items" class="font-semibold text-slate-900">0</span>
+            <!-- Datos de confirmación para el cliente -->
+            <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1.5 mb-4">
+              <div class="flex justify-between gap-2">
+                <span class="text-slate-500">Cliente:</span>
+                <span id="sum-cliente" class="font-semibold text-slate-900 text-right truncate">Sin definir</span>
               </div>
-              <div class="flex justify-between text-slate-600">
+              <div class="flex justify-between gap-2">
+                <span class="text-slate-500">Entrega:</span>
+                <span id="sum-entrega" class="font-semibold text-amber-700 text-right capitalize">-</span>
+              </div>
+              <div class="flex justify-between gap-2">
+                <span class="text-slate-500">Lugar / Obs:</span>
+                <span id="sum-obs" class="font-medium text-slate-700 text-right truncate">-</span>
+              </div>
+              <div class="flex justify-between gap-2">
+                <span class="text-slate-500">Documento:</span>
+                <span id="sum-doc" class="font-medium text-slate-700 text-right">Factura</span>
+              </div>
+            </div>
+
+            <!-- Lista de artículos añadidos con botón basurero -->
+            <div class="mb-4">
+              <div class="flex justify-between items-center text-xs font-bold text-slate-700 mb-2">
+                <span>Artículos añadidos (<span id="sum-items">0</span>)</span>
+              </div>
+              <div id="sum-items-list" class="max-h-56 overflow-y-auto divide-y divide-slate-100 border border-slate-100 rounded-xl bg-slate-50/40 px-2.5">
+                <div class="py-3 text-center text-xs text-slate-400">Sin artículos aún</div>
+              </div>
+            </div>
+
+            <div class="space-y-1.5 text-xs pt-2 border-t border-slate-100">
+              <div class="flex justify-between text-slate-500">
                 <span>Total Neto (aprox):</span>
-                <span id="sum-neto" class="font-semibold text-slate-900">$0</span>
+                <span id="sum-neto" class="font-semibold text-slate-800">$0</span>
               </div>
-              <div class="flex justify-between text-slate-600">
+              <div class="flex justify-between text-slate-500">
                 <span>IVA (19%):</span>
-                <span id="sum-iva" class="font-semibold text-slate-900">$0</span>
+                <span id="sum-iva" class="font-semibold text-slate-800">$0</span>
               </div>
-              <div class="flex justify-between text-slate-600">
+              <div class="flex justify-between text-slate-500">
                 <span>Valor exacto:</span>
                 <span id="sum-valor" class="font-medium text-slate-700">$0</span>
               </div>
-              <div class="pt-3 border-t border-slate-200 flex justify-between items-baseline">
-                <span class="text-base font-bold text-slate-900">Total Redondeado:</span>
+              <div class="pt-2.5 mt-1 border-t border-slate-200 flex justify-between items-baseline">
+                <span class="text-sm font-bold text-slate-900">Total Redondeado:</span>
                 <span id="sum-redondeo" class="text-2xl font-extrabold text-amber-600">$0</span>
               </div>
             </div>
 
-            <div class="mt-6 space-y-2.5">
+            <div class="mt-5 space-y-2">
               <button type="button" onclick="saveComanda()" class="w-full py-3 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-sm shadow-sm transition">
                 Guardar y Agendar Comanda
               </button>
-              <button type="button" onclick="resetComandaForm()" class="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition">
+              <button type="button" onclick="copyResumenWhatsApp()" class="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition">
+                Copiar Confirmación (WhatsApp)
+              </button>
+              <button type="button" onclick="resetComandaForm()" class="w-full py-2 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition">
                 Limpiar Formulario
               </button>
             </div>
