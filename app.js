@@ -282,7 +282,7 @@ window.quickAddItem = function(txt, pxq, ume) {
   addItemRow({ txt, pxq, ume, qty: 1 });
 };
 
-window.addItemRow = function(prefill = {}) {
+window.addItemRow = function(prefill = {}, autoFocus = false) {
   const container = document.getElementById('cmd-items-body');
   const card = document.createElement('div');
   card.className = 'item-row rounded-xl border border-slate-200 bg-slate-50/70 p-3 space-y-2.5';
@@ -343,6 +343,9 @@ window.addItemRow = function(prefill = {}) {
 
   container.appendChild(card);
   recalcTotals();
+  if (autoFocus) {
+    txtInput.focus();
+  }
 };
 
 function recalcTotals() {
