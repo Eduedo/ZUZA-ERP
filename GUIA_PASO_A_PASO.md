@@ -9,7 +9,7 @@ Para dejarlo **100% online, gratis y multiusuario** (accesible desde cualquier c
 ## Paso 1: Probar el sistema en tu computador ahora mismo
 1. Abre la carpeta del proyecto (`ERP ZUZA`).
 2. Haz doble clic en `index.html` (o ábrelo con Chrome/Edge).
-   > **Nota:** Como usa módulos ES (`type="module"`), algunos navegadores bloquean `file://`. Si ves la página en blanco, súbela directo al Paso 3 (toma 30 segundos en Netlify Drop) o ábrela con Live Server / `python -m http.server`.
+   > **Nota:** Como usa módulos ES (`type="module"`), algunos navegadores bloquean `file://`. Si ves la página en blanco, súbela directo al Paso 3 en **GitHub Pages** o ábrela con Live Server / `python -m http.server`.
 
 ---
 
@@ -25,12 +25,17 @@ Para dejarlo **100% online, gratis y multiusuario** (accesible desde cualquier c
 
 ---
 
-## Paso 3: Publicar la Web App Gratis en Internet (Netlify Drop o Vercel)
-1. Entra a **[app.netlify.com/drop](https://app.netlify.com/drop)** (crea una cuenta gratuita si te la pide).
-2. Arrastra la carpeta completa **`ERP ZUZA`** dentro del recuadro de Netlify Drop.
-3. En segundos te dará un enlace público HTTPS (ej: `https://erp-zuza.netlify.app`) que puedes abrir y guardar como acceso directo en el celular de todo tu equipo.
+## Paso 3: Publicar la Web App Gratis en Internet (GitHub Pages)
+No necesitas instalar nada en tu computador para subirla; puedes hacerlo directo desde la web de GitHub:
 
-*(Alternativa: también puedes subir la carpeta a un repositorio en GitHub y conectarlo gratis a Vercel o GitHub Pages).*
+1. Crea una cuenta gratuita en **[github.com](https://github.com)** (o inicia sesión si ya tienes una).
+2. Haz clic en el botón **+** (arriba a la derecha) → **New repository**.
+3. Ponle un nombre (ej. `erp-zuza`), déjalo en **Public** (en el plan gratuito GitHub Pages requiere repositorio público; tus datos reales estarán protegidos en Supabase, no en el código) y haz clic en **Create repository**.
+4. En la pantalla del repositorio nuevo, haz clic en el enlace **uploading an existing file**.
+5. Arrastra los archivos de tu carpeta **`ERP ZUZA`** (`index.html`, `app.js`, `seed-data.js`, `styles.css`, `supabase-schema.sql`, `GUIA_PASO_A_PASO.md`) dentro del recuadro y presiona **Commit changes** (botón verde abajo).
+6. Ahora ve a la pestaña **Settings** (arriba en tu repositorio) → en el menú izquierdo entra a **Pages**.
+7. En **Build and deployment → Branch**, cambia `None` por **`main`** (carpeta `/ (root)`) y presiona **Save**.
+8. Espera 1 a 2 minutos y recarga esa misma página: arriba aparecerá tu enlace público HTTPS (ej: `https://tu-usuario.github.io/erp-zuza/`). ¡Ese es el link que puedes abrir y guardar en el celular de todo tu equipo!
 
 ---
 

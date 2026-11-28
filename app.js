@@ -357,6 +357,8 @@ window.resetComandaForm = async function() {
 
   document.getElementById('cmd-fecha-pedido').value = todayISO();
   document.getElementById('cmd-fecha-entrega').value = tomorrowISO();
+  document.getElementById('cmd-fecha-elaboracion').value = tomorrowISO();
+  document.getElementById('cmd-fecha-envasado').value = tomorrowISO();
   document.getElementById('cmd-eta-hora').value = '12:00';
   document.getElementById('cmd-tipo-doc').value = 'Factura';
   document.getElementById('cmd-cliente').value = '';
@@ -368,7 +370,7 @@ window.resetComandaForm = async function() {
   document.getElementById('cmd-items-body').innerHTML = '';
   addItemRow();
   await reserveNextOC(false);
-  updateDescriptorPreview();
+  onFechaHoraEntregaChange();
   recalcTotals();
 };
 
@@ -390,6 +392,8 @@ window.editComanda = function(id) {
   document.getElementById('cmd-oc').value = c.oc;
   document.getElementById('cmd-fecha-pedido').value = c.fecha_pedido || todayISO();
   document.getElementById('cmd-fecha-entrega').value = c.fecha_entrega || tomorrowISO();
+  document.getElementById('cmd-fecha-elaboracion').value = c.fecha_elaboracion || c.fecha_entrega || tomorrowISO();
+  document.getElementById('cmd-fecha-envasado').value = c.fecha_envasado || c.fecha_entrega || tomorrowISO();
   const etaMatch = (c.hrs_entrega || '').match(/(\d{1,2}:\d{2})/);
   document.getElementById('cmd-eta-hora').value = etaMatch ? etaMatch[1].padStart(5, '0') : '12:00';
   document.getElementById('cmd-tipo-doc').value = c.tipo_documento || 'Factura';
@@ -398,6 +402,7 @@ window.editComanda = function(id) {
   document.getElementById('cmd-tipo-servicio').value = c.tipo_servicio || 'Servicio';
   document.getElementById('cmd-tip-serv').value = c.tip_serv || '';
   document.getElementById('cmd-obs').value = c.obs || '';
+  document.getElementById('urgencia-auto-badge').textContent = '';
 
   const body = document.getElementById('cmd-items-body');
   body.innerHTML = '';
@@ -406,7 +411,8 @@ window.editComanda = function(id) {
       txt: it.txt,
       ume: it.ume,
       pxq: it.pxq,
-      qty: (it.ume === 'kg' || it.ume === 'g') && it.peso ? it.peso : it.qty
+      qty: (it.ume === 'kg' || it.ume === 'g') && it.peso ? it.peso : it.qty,
+      bulto: it.bulto || ''
     });
   });
 
@@ -414,6 +420,54 @@ window.editComanda = function(id) {
   recalcTotals();
   switchTab('nueva-comanda');
   window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+window.onFechaHoraEntregaChange = function() {
+  const fechaEnt = document.getElementById('cmd-fecha-entrega').value;
+  const hora = document.getElementById('cmd-eta-hora').value || '12:00';
+  const badge = document.getElementById('urgencia-auto-badge');
+
+  if (fechaEnt) {
+    // Si elaboración/envasado no fueron editados manualmente en un pedido nuevo, acompañan la fecha de entrega
+    if (!state.editingComandaId) {
+      document.getElementById('cmd-fecha-elaboracion').value = fechaEnt;
+      document.getElementById('cmd-fecha-envasado').value = fechaEnt;
+    }
+
+    const target = new Date(`${fechaEnt}T${hora}:00`);
+    const diffHrs = (target.getTime() - Date.now()) / 3600000;
+
+    if (diffHrs <= 4) {
+      document.getElementById('cmd-tipo-servicio').value = 'Servicio urgente';
+      document.getElementById('cmd-tip-serv').value = '>3hrs';
+      badge.textContent = diffHrs > 0 ? `Faltan ${diffHrs.toFixed(1)} hrs → Urgente (>3hrs)` : 'Entrega inmediata → Urgente';
+      badge.className = 'text-[10px] font-bold text-rose-600 mt-1';
+    } else if (diffHrs <= 8) {
+      document.getElementById('cmd-tipo-servicio').value = 'Servicio urgente';
+      document.getElementById('cmd-tip-serv').value = '>7hrs';
+      badge.textContent = `Faltan ${diffHrs.toFixed(1)} hrs → Urgente (>7hrs)`;
+      badge.className = 'text-[10px] font-bold text-rose-600 mt-1';
+    } else if (diffHrs <= 24) {
+      document.getElementById('cmd-tipo-servicio').value = 'Servicio';
+      document.getElementById('cmd-tip-serv').value = '> 11hrs';
+      badge.textContent = `Faltan ${Math.round(diffHrs)} hrs (> 11hrs)`;
+      badge.className = 'text-[10px] font-semibold text-amber-700 mt-1';
+    } else if (diffHrs >= 72) {
+      document.getElementById('cmd-tipo-servicio').value = 'Servicio';
+      document.getElementById('cmd-tip-serv').value = '>72hrs';
+      badge.textContent = `Faltan ${Math.round(diffHrs)} hrs (>72hrs)`;
+      badge.className = 'text-[10px] font-semibold text-emerald-700 mt-1';
+    } else {
+      document.getElementById('cmd-tipo-servicio').value = 'Servicio';
+      document.getElementById('cmd-tip-serv').value = '';
+      badge.textContent = `Faltan ${Math.round(diffHrs)} hrs (Normal)`;
+      badge.className = 'text-[10px] font-semibold text-slate-500 mt-1';
+    }
+  } else {
+    badge.textContent = '';
+  }
+
+  updateDescriptorPreview();
 };
 
 window.onClienteChange = function() {
@@ -497,9 +551,12 @@ window.addItemRow = function(prefill = {}, autoFocus = false) {
       </div>
     </div>
 
-    <div class="flex items-center justify-between pt-2 border-t border-slate-200/80 text-xs">
-      <span class="text-slate-500">Neto unit.: <strong class="font-mono text-slate-700 item-neto">$0</strong></span>
-      <span class="text-slate-600">Total Redondeado: <strong class="text-sm font-extrabold text-amber-700 item-redondeo">$0</strong></span>
+    <div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-200/80 text-xs">
+      <div class="flex items-center gap-2">
+        <span class="text-slate-500">Neto: <strong class="font-mono text-slate-700 item-neto">$0</strong></span>
+        <input type="text" placeholder="Bulto (ej: 1 de 2)" class="input-field !w-28 !py-1 !px-2 text-[11px] item-bulto" value="${prefill.bulto || ''}" />
+      </div>
+      <span class="text-slate-600">Total: <strong class="text-sm font-extrabold text-amber-700 item-redondeo">$0</strong></span>
     </div>
   `;
 
@@ -670,7 +727,8 @@ window.saveComanda = async function() {
       peso: ume === 'kg' || ume === 'g' ? qty : 0,
       neto: Number(calcNetoUnit(pxq).toFixed(4)),
       valor,
-      redondeo: roundToHundred(valor)
+      redondeo: roundToHundred(valor),
+      bulto: tr.querySelector('.item-bulto')?.value.trim() || ''
     };
   }).filter(it => it.txt !== '');
 
@@ -699,6 +757,8 @@ window.saveComanda = async function() {
     tip_serv: document.getElementById('cmd-tip-serv').value,
     tipo_servicio: tipoServicio,
     fecha_entrega: fechaEntrega,
+    fecha_elaboracion: document.getElementById('cmd-fecha-elaboracion').value || fechaEntrega,
+    fecha_envasado: document.getElementById('cmd-fecha-envasado').value || fechaEntrega,
     hrs_entrega: hrsEntrega,
     obs,
     texto_fecha: textoFecha,
@@ -804,12 +864,48 @@ window.renderAgenda = function() {
 
   container.innerHTML = Object.entries(groups).map(([fecha, cmds]) => {
     const titulo = fecha !== 'Sin fecha' ? formatTextoFecha(fecha) : 'Sin fecha';
+
+    // Consolidado de Producción Diario (suma cantidades por producto y UME, excluyendo Despacho)
+    const consolidado = {};
+    cmds.forEach(c => {
+      (c.items || []).forEach(it => {
+        if (!it.txt || it.txt.toLowerCase().startsWith('despacho')) return;
+        const cant = (it.ume === 'kg' || it.ume === 'g') && it.peso ? Number(it.peso) : Number(it.qty);
+        const key = `${it.txt}|||${it.ume}`;
+        consolidado[key] = (consolidado[key] || 0) + (cant || 0);
+      });
+    });
+
+    const consEntries = Object.entries(consolidado).map(([key, total]) => {
+      const [nombre, ume] = key.split('|||');
+      return { nombre, ume, total: Number(total.toFixed(3)) };
+    }).sort((a, b) => b.total - a.total);
+
+    const consHtml = consEntries.length ? `
+      <div class="rounded-xl bg-amber-50/70 border border-amber-200 p-3 text-xs">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <span class="font-bold text-amber-900">Consolidado de Producción (${titulo})</span>
+          <button type="button" onclick="copyConsolidadoDia('${fecha}')" class="px-2.5 py-1 rounded-lg bg-white border border-amber-300 text-amber-800 font-semibold hover:bg-amber-100 transition text-[11px]">
+            Copiar para Cocina
+          </button>
+        </div>
+        <div class="flex flex-wrap gap-1.5">
+          ${consEntries.map(e => `
+            <span class="px-2.5 py-1 rounded-lg bg-white border border-amber-200 text-slate-800">
+              <strong class="text-amber-700">${e.total} ${e.ume}</strong> ${e.nombre}
+            </span>
+          `).join('')}
+        </div>
+      </div>
+    ` : '';
+
     return `
       <div class="space-y-3">
         <div class="flex items-center gap-2">
           <span class="px-3 py-1 rounded-full bg-slate-900 text-white text-xs font-bold capitalize">${titulo}</span>
           <span class="text-xs text-slate-500">(${cmds.length} ${cmds.length === 1 ? 'pedido' : 'pedidos'})</span>
         </div>
+        ${consHtml}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           ${cmds.map(c => renderAgendaCard(c)).join('')}
         </div>
@@ -818,14 +914,51 @@ window.renderAgenda = function() {
   }).join('');
 };
 
+window.copyConsolidadoDia = function(fecha) {
+  const filtroEstado = document.getElementById('agenda-filter-estado').value;
+  const cmds = state.comandas.filter(c => {
+    if ((c.fecha_entrega || 'Sin fecha') !== fecha) return false;
+    if (filtroEstado === 'activos') return c.estado_produccion !== 'Entregado' && c.estado_produccion !== 'Anulado';
+    if (filtroEstado !== 'todos') return c.estado_produccion === filtroEstado;
+    return true;
+  });
+
+  const consolidado = {};
+  cmds.forEach(c => {
+    (c.items || []).forEach(it => {
+      if (!it.txt || it.txt.toLowerCase().startsWith('despacho')) return;
+      const cant = (it.ume === 'kg' || it.ume === 'g') && it.peso ? Number(it.peso) : Number(it.qty);
+      const key = `${it.txt}|||${it.ume}`;
+      consolidado[key] = (consolidado[key] || 0) + (cant || 0);
+    });
+  });
+
+  const titulo = fecha !== 'Sin fecha' ? formatTextoFecha(fecha) : 'Sin fecha';
+  const lines = Object.entries(consolidado).map(([key, total]) => {
+    const [nombre, ume] = key.split('|||');
+    return `• ${Number(total.toFixed(3))} ${ume} × ${nombre}`;
+  });
+
+  if (!lines.length) return showToast('No hay productos para copiar en este día.', true);
+  const text = `*CONSOLIDADO PRODUCCIÓN — ${titulo.toUpperCase()}*\n(${cmds.length} pedidos)\n\n${lines.join('\n')}`;
+  navigator.clipboard.writeText(text).then(() => showToast('Consolidado copiado para Cocina.'));
+};
+
 function renderAgendaCard(c) {
   const isUrgente = c.tipo_servicio === 'Servicio urgente';
   const itemsHtml = (c.items || []).map(i => `
-    <li class="flex justify-between text-xs py-0.5">
-      <span class="text-slate-700"><strong>${i.ume === 'kg' || i.ume === 'g' ? i.peso + ' ' + i.ume : i.qty}</strong> × ${i.txt}</span>
-      <span class="text-slate-500 font-mono">${formatCLP(i.redondeo)}</span>
+    <li class="flex justify-between text-xs py-0.5 gap-2">
+      <span class="text-slate-700">
+        <strong>${i.ume === 'kg' || i.ume === 'g' ? i.peso + ' ' + i.ume : i.qty}</strong> × ${i.txt}
+        ${i.bulto ? `<span class="ml-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-semibold">Bulto: ${i.bulto}</span>` : ''}
+      </span>
+      <span class="text-slate-500 font-mono shrink-0">${formatCLP(i.redondeo)}</span>
     </li>
   `).join('');
+
+  const elabInfo = (c.fecha_elaboracion || c.fecha_envasado)
+    ? `<div class="text-[11px] text-slate-500 mb-1">Elab: ${c.fecha_elaboracion || '-'} • Env: ${c.fecha_envasado || '-'}</div>`
+    : '';
 
   return `
     <div class="bg-white rounded-2xl border ${isUrgente ? 'border-rose-300 ring-1 ring-rose-100' : 'border-slate-200'} p-4 shadow-sm flex flex-col justify-between gap-3">
@@ -843,7 +976,8 @@ function renderAgendaCard(c) {
         </div>
 
         <div class="text-sm font-bold text-slate-900">${c.cliente_nombre}</div>
-        <div class="text-xs text-slate-600 mb-2">${c.obs || 'Sin observaciones de lugar'}</div>
+        <div class="text-xs text-slate-600 mb-1">${c.obs || 'Sin observaciones de lugar'}</div>
+        ${elabInfo}
 
         <ul class="border-t border-b border-slate-100 py-2 my-2 space-y-0.5">
           ${itemsHtml}
@@ -892,14 +1026,17 @@ window.printComanda = function(id) {
       <div><strong>Razón Social:</strong> ${rs ? rs.razon_social : 'Particular'}</div>
       <div><strong>Entrega:</strong> ${c.fecha_entrega} (${c.hrs_entrega})</div>
       <div><strong>Lugar:</strong> ${c.obs || '-'}</div>
+      <div><strong>Elaboración:</strong> ${c.fecha_elaboracion || '-'}</div>
+      <div><strong>Envasado:</strong> ${c.fecha_envasado || '-'}</div>
     </div>
     <table class="w-full text-xs border-t border-b border-slate-200 my-2">
-      <thead><tr class="text-left border-b"><th class="py-1">Cant</th><th>Descripción</th><th class="text-right">Total</th></tr></thead>
+      <thead><tr class="text-left border-b"><th class="py-1">Cant</th><th>Descripción</th><th>Bulto</th><th class="text-right">Total</th></tr></thead>
       <tbody>
         ${(c.items || []).map(i => `
           <tr>
             <td class="py-1 font-bold">${i.ume === 'kg' || i.ume === 'g' ? i.peso + i.ume : i.qty}</td>
             <td>${i.txt}</td>
+            <td class="text-slate-500">${i.bulto || '-'}</td>
             <td class="text-right">${formatCLP(i.redondeo)}</td>
           </tr>
         `).join('')}
@@ -1545,3 +1682,9 @@ window.disconnectSupabase = async function() {
 };
 
 init();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
+}
