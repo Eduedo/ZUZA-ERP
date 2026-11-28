@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ERP ZUZA — Comandas y Agenda</title>
-  <meta name="theme-color" content="#d97706" />
+  <meta name="theme-color" content="#C8102E" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="ERP ZUZA" />
@@ -13,39 +13,39 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <link rel="stylesheet" href="styles.css?v=6" />
+  <link rel="stylesheet" href="styles.css?v=9" />
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+<body class="min-h-screen flex flex-col" style="background:var(--ui-bg);color:var(--ui-text)">
 
   <!-- Header -->
-  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+  <header class="sticky top-0 z-30" style="background:var(--ui-text);border-bottom:3px solid var(--accent)">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
       <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-amber-600 text-white flex items-center justify-center font-bold text-lg shadow-sm">
+        <div class="w-10 h-10 rounded-lg flex items-center justify-center font-black text-lg" style="background:var(--accent);color:#fff;letter-spacing:-0.02em">
           Z
         </div>
         <div>
-          <h1 class="text-lg font-bold text-slate-900 leading-tight">ERP ZUZA</h1>
-          <p class="text-xs text-slate-500">Gestión de Comandas, Agenda y DTE</p>
+          <h1 class="text-lg font-bold leading-tight" style="color:#ffffff;letter-spacing:0.04em">ERP ZUZA</h1>
+          <p class="text-xs" style="color:rgba(255,255,255,0.5)">Gestión de Comandas, Agenda y DTE</p>
         </div>
       </div>
 
       <div class="flex flex-wrap items-center gap-2 sm:gap-3">
-        <span id="next-oc-badge" class="px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+        <span id="next-oc-badge" class="px-3 py-1 text-xs font-bold border" style="border-radius:4px;background:var(--accent2);color:var(--ui-text);border-color:var(--accent2-hover);letter-spacing:0.04em">
           OC Reservada: ZRA-291
         </span>
-        <button id="btn-user-badge" onclick="openLoginModal()" class="px-3 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-800 border border-indigo-200 hover:bg-indigo-100 transition flex items-center gap-1.5">
+        <button id="btn-user-badge" onclick="openLoginModal()" class="px-3 py-1 text-xs font-semibold transition flex items-center gap-1.5" style="border-radius:4px;background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.85);border:1px solid rgba(255,255,255,0.2)">
           <span id="user-badge-text">Sin usuario</span>
         </button>
-        <button id="btn-connection-status" onclick="switchTab('config')" class="px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-300 hover:bg-slate-200 transition flex items-center gap-1.5">
-          <span class="w-2 h-2 rounded-full bg-amber-500" id="status-dot"></span>
+        <button id="btn-connection-status" onclick="switchTab('config')" class="px-3 py-1 text-xs font-semibold transition flex items-center gap-1.5" style="border-radius:4px;background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.65);border:1px solid rgba(255,255,255,0.15)">
+          <span class="w-2 h-2 rounded-full" style="background:var(--accent2)" id="status-dot"></span>
           <span id="status-text">Modo Local</span>
         </button>
       </div>
     </div>
 
     <!-- Navigation Tabs -->
-    <nav class="max-w-7xl mx-auto px-4 sm:px-6 flex gap-1 overflow-x-auto border-t border-slate-100">
+    <nav class="max-w-7xl mx-auto px-4 sm:px-6 flex gap-1 overflow-x-auto" style="border-top:1px solid rgba(255,255,255,0.08)">
       <button class="tab-btn active" data-tab="nueva-comanda" onclick="switchTab('nueva-comanda')">
         + Nueva Comanda
       </button>
@@ -72,10 +72,10 @@
 
     <!-- TAB 1: NUEVA COMANDA -->
     <section id="tab-nueva-comanda" class="tab-panel">
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <!-- Form Column -->
-        <div class="lg:col-span-2 space-y-5">
-          <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+        <div class="md:col-span-2 space-y-5 min-w-0">
+          <div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm overflow-hidden">
             <div id="edit-mode-banner" class="hidden mb-4 p-3 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-between gap-2 text-xs">
               <span class="font-bold text-indigo-800">Editando pedido existente: <span id="edit-oc-label"></span></span>
               <button type="button" onclick="cancelEditComanda()" class="px-2.5 py-1 rounded-lg bg-white border border-indigo-300 text-indigo-700 font-semibold hover:bg-indigo-100">Cancelar Edición</button>
@@ -86,18 +86,18 @@
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
+              <div class="min-w-0">
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Nº Pedido (OC)</label>
-                <div class="flex gap-1.5">
+                <div class="flex gap-1.5 min-w-0">
                   <input id="cmd-oc" type="text" class="input-field font-bold text-amber-700 bg-amber-50/50" oninput="updateDescriptorPreview()" />
                   <button type="button" onclick="reserveNextOC(true)" title="Reservar nuevo número" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-300 shrink-0">↻</button>
                 </div>
               </div>
-              <div>
+              <div class="min-w-0">
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Fecha Pedido</label>
                 <input id="cmd-fecha-pedido" type="date" class="input-field" />
               </div>
-              <div>
+              <div class="min-w-0">
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Tipo Documento</label>
                 <select id="cmd-tipo-doc" class="input-field" onchange="updateDescriptorPreview()">
                   <option value="Factura">Factura</option>
@@ -108,12 +108,12 @@
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-              <div>
+              <div class="min-w-0">
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Cliente / Solicitante</label>
                 <input id="cmd-cliente" list="lista-contactos" placeholder="Ej: Francisca González" class="input-field" oninput="onClienteChange()" />
                 <datalist id="lista-contactos"></datalist>
               </div>
-              <div>
+              <div class="min-w-0">
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Razón Social (Facturación)</label>
                 <select id="cmd-razon-social" class="input-field">
                   <option value="">-- Particular / Sin Razón Social --</option>
@@ -121,23 +121,23 @@
               </div>
             </div>
 
-            <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mt-4">
-              <div>
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mt-4">
+              <div class="min-w-0">
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Fecha Entrega</label>
                 <input id="cmd-fecha-entrega" type="date" class="input-field" onchange="onFechaHoraEntregaChange()" />
               </div>
-              <div>
+              <div class="min-w-0">
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Hora Entrega (ETA)</label>
                 <input id="cmd-eta-hora" type="time" value="12:00" class="input-field" onchange="onFechaHoraEntregaChange()" />
               </div>
-              <div>
+              <div class="min-w-0">
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Tipo Servicio</label>
                 <select id="cmd-tipo-servicio" class="input-field" onchange="updateDescriptorPreview()">
                   <option value="Servicio">Servicio</option>
                   <option value="Servicio urgente">Servicio urgente</option>
                 </select>
               </div>
-              <div>
+              <div class="min-w-0">
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Anticipación (Tip. Serv)</label>
                 <select id="cmd-tip-serv" class="input-field">
                   <option value="">Normal</option>
@@ -151,11 +151,11 @@
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-              <div>
+              <div class="min-w-0">
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Fecha de Elaboración</label>
                 <input id="cmd-fecha-elaboracion" type="date" class="input-field" />
               </div>
-              <div>
+              <div class="min-w-0">
                 <label class="block text-xs font-semibold text-slate-600 mb-1">Fecha de Envasado</label>
                 <input id="cmd-fecha-envasado" type="date" class="input-field" />
               </div>
@@ -206,8 +206,8 @@
         </div>
 
         <!-- Summary Column -->
-        <div class="space-y-5">
-          <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm sticky top-28">
+        <div class="space-y-5 min-w-0">
+          <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm md:sticky md:top-28">
             <div class="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-slate-100">
               <h3 class="text-base font-bold text-slate-900">Resumen de Comanda</h3>
               <span id="sum-oc-badge" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">ZRA-291</span>
@@ -567,6 +567,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=6"></script>
+  <script type="module" src="app.js?v=9"></script>
 </body>
 </html>
