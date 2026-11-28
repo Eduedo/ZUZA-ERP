@@ -268,39 +268,63 @@ window.updateDescriptorPreview = function() {
   document.getElementById('cmd-descriptor-preview').textContent = descriptor;
 };
 
+window.quickAddItem = function(txt, pxq, ume) {
+  const rows = document.querySelectorAll('#cmd-items-body .item-row');
+  // Si la primera fila está vacía, reutilizarla en vez de crear una extra
+  if (rows.length === 1 && !rows[0].querySelector('.item-txt').value.trim()) {
+    rows[0].querySelector('.item-txt').value = txt;
+    rows[0].querySelector('.item-pxq').value = pxq;
+    rows[0].querySelector('.item-ume').value = ume;
+    rows[0].querySelector('.item-qty').focus();
+    recalcTotals();
+    return;
+  }
+  addItemRow({ txt, pxq, ume, qty: 1 });
+};
+
 window.addItemRow = function(prefill = {}) {
-  const tbody = document.getElementById('cmd-items-body');
-  const tr = document.createElement('tr');
-  tr.className = 'item-row';
-  tr.innerHTML = `
-    <td class="py-2 pr-2">
-      <input type="text" list="lista-productos" placeholder="Escribe o elige producto..." class="input-field !py-1.5 text-xs item-txt" value="${prefill.txt || ''}" />
-    </td>
-    <td class="py-2 px-2">
-      <select class="input-field !py-1.5 text-xs item-ume">
-        <option value="un" ${(prefill.ume || 'un') === 'un' ? 'selected' : ''}>un</option>
-        <option value="punit" ${prefill.ume === 'punit' ? 'selected' : ''}>punit</option>
-        <option value="kg" ${prefill.ume === 'kg' ? 'selected' : ''}>kg</option>
-        <option value="g" ${prefill.ume === 'g' ? 'selected' : ''}>g</option>
-      </select>
-    </td>
-    <td class="py-2 px-2">
-      <input type="number" step="any" min="0" class="input-field !py-1.5 text-xs item-pxq" value="${prefill.pxq ?? 0}" />
-    </td>
-    <td class="py-2 px-2">
-      <input type="number" step="any" min="0" class="input-field !py-1.5 text-xs item-qty" value="${prefill.qty ?? 1}" />
-    </td>
-    <td class="py-2 px-2 text-right font-mono text-slate-600 item-neto">$0</td>
-    <td class="py-2 px-2 text-right font-bold text-slate-900 item-redondeo">$0</td>
-    <td class="py-2 pl-2 text-right">
-      <button type="button" class="text-rose-500 hover:text-rose-700 font-bold text-base btn-del-row">&times;</button>
-    </td>
+  const container = document.getElementById('cmd-items-body');
+  const card = document.createElement('div');
+  card.className = 'item-row rounded-xl border border-slate-200 bg-slate-50/70 p-3 space-y-2.5';
+  card.innerHTML = `
+    <div class="flex items-start gap-2">
+      <div class="flex-1">
+        <label class="block text-[11px] font-semibold text-slate-500 mb-1">Producto / Servicio</label>
+        <input type="text" list="lista-productos" placeholder="Busca o escribe el producto..." class="input-field !py-2 text-sm font-medium item-txt" value="${prefill.txt || ''}" />
+      </div>
+      <button type="button" title="Eliminar ítem" class="mt-6 w-9 h-9 rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 font-bold text-lg flex items-center justify-center shrink-0 btn-del-row">&times;</button>
+    </div>
+
+    <div class="grid grid-cols-3 gap-2.5">
+      <div>
+        <label class="block text-[11px] font-semibold text-slate-500 mb-1">Cant / Peso</label>
+        <input type="number" inputmode="decimal" step="any" min="0" class="input-field !py-2 text-sm font-semibold item-qty" value="${prefill.qty ?? 1}" />
+      </div>
+      <div>
+        <label class="block text-[11px] font-semibold text-slate-500 mb-1">UME</label>
+        <select class="input-field !py-2 text-sm item-ume">
+          <option value="un" ${(prefill.ume || 'un') === 'un' ? 'selected' : ''}>un</option>
+          <option value="punit" ${prefill.ume === 'punit' ? 'selected' : ''}>punit</option>
+          <option value="kg" ${prefill.ume === 'kg' ? 'selected' : ''}>kg</option>
+          <option value="g" ${prefill.ume === 'g' ? 'selected' : ''}>g</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-[11px] font-semibold text-slate-500 mb-1">Precio c/IVA</label>
+        <input type="number" inputmode="decimal" step="any" min="0" class="input-field !py-2 text-sm font-semibold item-pxq" value="${prefill.pxq ?? 0}" />
+      </div>
+    </div>
+
+    <div class="flex items-center justify-between pt-2 border-t border-slate-200/80 text-xs">
+      <span class="text-slate-500">Neto unit.: <strong class="font-mono text-slate-700 item-neto">$0</strong></span>
+      <span class="text-slate-600">Total Redondeado: <strong class="text-sm font-extrabold text-amber-700 item-redondeo">$0</strong></span>
+    </div>
   `;
 
-  const txtInput = tr.querySelector('.item-txt');
-  const umeInput = tr.querySelector('.item-ume');
-  const pxqInput = tr.querySelector('.item-pxq');
-  const qtyInput = tr.querySelector('.item-qty');
+  const txtInput = card.querySelector('.item-txt');
+  const umeInput = card.querySelector('.item-ume');
+  const pxqInput = card.querySelector('.item-pxq');
+  const qtyInput = card.querySelector('.item-qty');
 
   txtInput.addEventListener('input', () => {
     const prod = state.productos.find(p => p.nombre.toLowerCase() === txtInput.value.trim().toLowerCase());
@@ -312,12 +336,12 @@ window.addItemRow = function(prefill = {}) {
   });
 
   [pxqInput, qtyInput, umeInput].forEach(el => el.addEventListener('input', recalcTotals));
-  tr.querySelector('.btn-del-row').addEventListener('click', () => {
-    tr.remove();
+  card.querySelector('.btn-del-row').addEventListener('click', () => {
+    card.remove();
     recalcTotals();
   });
 
-  tbody.appendChild(tr);
+  container.appendChild(card);
   recalcTotals();
 };
 

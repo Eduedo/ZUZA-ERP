@@ -144,36 +144,33 @@
             </div>
           </div>
 
-          <!-- Items Table -->
-          <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
-              <h2 class="text-base font-bold text-slate-900">Detalle de Productos</h2>
-              <div class="flex gap-2">
-                <button type="button" onclick="openCalcModal()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300 transition">
-                  Calcular Despacho (HH + Km)
+          <!-- Items Cards (Responsive Mobile + Desktop) -->
+          <div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div>
+                <h2 class="text-base font-bold text-slate-900">Detalle de Productos</h2>
+                <p class="text-[11px] text-slate-500">Escribe para buscar o toca un acceso rápido</p>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" onclick="openCalcModal()" class="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300 transition">
+                  Calcular Despacho
                 </button>
-                <button type="button" onclick="addItemRow()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-600 text-white hover:bg-amber-700 transition">
+                <button type="button" onclick="addItemRow()" class="px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 shadow-sm transition">
                   + Agregar Ítem
                 </button>
               </div>
             </div>
 
-            <div class="overflow-x-auto">
-              <table class="w-full text-left border-collapse text-sm">
-                <thead>
-                  <tr class="border-b border-slate-200 text-xs text-slate-500">
-                    <th class="py-2 pr-2">Producto (`txt`)</th>
-                    <th class="py-2 px-2 w-20">UME</th>
-                    <th class="py-2 px-2 w-28">Precio (`pxq`)</th>
-                    <th class="py-2 px-2 w-24">Cant / Peso</th>
-                    <th class="py-2 px-2 w-24 text-right">Neto Unit.</th>
-                    <th class="py-2 px-2 w-28 text-right">Redondeo</th>
-                    <th class="py-2 pl-2 w-10"></th>
-                  </tr>
-                </thead>
-                <tbody id="cmd-items-body" class="divide-y divide-slate-100"></tbody>
-              </table>
+            <!-- Quick-Add Chips -->
+            <div class="flex flex-wrap gap-1.5 mb-4 pb-3 border-b border-slate-100">
+              <span class="text-[11px] font-semibold text-slate-400 self-center mr-1">Rápido:</span>
+              <button type="button" onclick="quickAddItem('Pastelillos cóctel', 300, 'un')" class="px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition">+ Pastelillos ($300)</button>
+              <button type="button" onclick="quickAddItem('Sopaipillas cóctel', 185, 'un')" class="px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition">+ Sopaipillas ($185)</button>
+              <button type="button" onclick="quickAddItem('Mini Galletas artesanales', 220, 'un')" class="px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition">+ Mini Galletas ($220)</button>
+              <button type="button" onclick="quickAddItem('Despacho', 7000, 'un')" class="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 transition">+ Despacho ($7.000)</button>
             </div>
+
+            <div id="cmd-items-body" class="space-y-3"></div>
             <datalist id="lista-productos"></datalist>
           </div>
         </div>
