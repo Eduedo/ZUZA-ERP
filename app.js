@@ -1,4 +1,5 @@
 import {
+  SEED_USUARIOS,
   SEED_RAZONES_SOCIALES,
   SEED_CONTACTOS,
   SEED_PRODUCTOS,
@@ -9,21 +10,38 @@ import {
 // ESTADO GLOBAL Y CONFIGURACIÓN
 // ============================================================================
 const STORAGE_KEYS = {
+  USUARIOS: 'zuza_usuarios',
   RAZONES: 'zuza_razones_sociales',
   CONTACTOS: 'zuza_contactos',
   PRODUCTOS: 'zuza_productos',
   COMANDAS: 'zuza_comandas',
+  RESERVAS: 'zuza_reservas_oc',
+  CURRENT_USER: 'zuza_current_user',
   SB_URL: 'zuza_sb_url',
   SB_KEY: 'zuza_sb_key'
 };
 
+function getSessionId() {
+  let sid = sessionStorage.getItem('zuza_session_id');
+  if (!sid) {
+    sid = (crypto.randomUUID ? crypto.randomUUID() : 'sess_' + Math.random().toString(36).slice(2) + Date.now());
+    sessionStorage.setItem('zuza_session_id', sid);
+  }
+  return sid;
+}
+
 let state = {
+  usuarios: [],
   razonesSociales: [],
   contactos: [],
   productos: [],
   comandas: [],
   supabase: null,
-  isOnline: false
+  isOnline: false,
+  sessionId: getSessionId(),
+  currentUser: null,
+  reservedOC: null,       // { numero_correlativo, oc }
+  editingComandaId: null  // null = creando nueva, number = editando existente
 };
 
 // ============================================================================
@@ -36,10 +54,7 @@ function formatTextoFecha(dateStr) {
   if (!dateStr) return 'sábado 00 de enero';
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
-  const diaSemana = DIAS[dt.getDay()];
-  const diaNum = String(d).padStart(2, '0');
-  const mes = MESES[m - 1];
-  return `${diaSemana} ${diaNum} de ${mes}`;
+  return `${DIAS[dt.getDay()]} ${String(d).padStart(2, '0')} de ${MESES[m - 1]}`;
 }
 
 function roundToHundred(val) {
@@ -56,19 +71,13 @@ function formatCLP(num) {
 
 function todayISO() {
   const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
 function tomorrowISO() {
   const now = new Date();
   now.setDate(now.getDate() + 1);
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
 function showToast(msg, isError = false) {
@@ -104,11 +113,26 @@ async function init() {
     setConnectionBadge(false);
   }
 
+  // Cargar usuario activo o pedir Login
+  const savedUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+  if (savedUser) {
+    try {
+      const parsed = JSON.parse(savedUser);
+      const exists = state.usuarios.find(u => u.nombre === parsed.nombre && u.activo !== false);
+      if (exists) state.currentUser = exists;
+    } catch (_) {}
+  }
+
+  updateUserBadge();
   populateSelects();
-  resetComandaForm();
+  await resetComandaForm();
   renderAgenda();
   renderHistorial();
   renderCatalogo();
+
+  if (!state.currentUser) {
+    openLoginModal();
+  }
 }
 
 function setConnectionBadge(online) {
@@ -125,6 +149,9 @@ function setConnectionBadge(online) {
 }
 
 function loadFromLocal() {
+  if (!localStorage.getItem(STORAGE_KEYS.USUARIOS)) {
+    localStorage.setItem(STORAGE_KEYS.USUARIOS, JSON.stringify(SEED_USUARIOS));
+  }
   if (!localStorage.getItem(STORAGE_KEYS.RAZONES)) {
     localStorage.setItem(STORAGE_KEYS.RAZONES, JSON.stringify(SEED_RAZONES_SOCIALES));
   }
@@ -138,13 +165,15 @@ function loadFromLocal() {
     localStorage.setItem(STORAGE_KEYS.COMANDAS, JSON.stringify(SEED_COMANDAS));
   }
 
+  state.usuarios = JSON.parse(localStorage.getItem(STORAGE_KEYS.USUARIOS));
   state.razonesSociales = JSON.parse(localStorage.getItem(STORAGE_KEYS.RAZONES));
   state.contactos = JSON.parse(localStorage.getItem(STORAGE_KEYS.CONTACTOS));
-  state.productos = JSON.parse(localStorage.getItem(STORAGE_KEYS.PRODUCTOS));
+  state.productos = JSON.parse(localStorage.getItem(STORAGE_KEYS.PRODUCTOS)).map(p => ({ ...p, activo: p.activo !== false }));
   state.comandas = JSON.parse(localStorage.getItem(STORAGE_KEYS.COMANDAS));
 }
 
 function saveLocal() {
+  localStorage.setItem(STORAGE_KEYS.USUARIOS, JSON.stringify(state.usuarios));
   localStorage.setItem(STORAGE_KEYS.RAZONES, JSON.stringify(state.razonesSociales));
   localStorage.setItem(STORAGE_KEYS.CONTACTOS, JSON.stringify(state.contactos));
   localStorage.setItem(STORAGE_KEYS.PRODUCTOS, JSON.stringify(state.productos));
@@ -153,7 +182,8 @@ function saveLocal() {
 
 async function loadFromSupabase() {
   const sb = state.supabase;
-  const [rsRes, contRes, prodRes, cmdRes] = await Promise.all([
+  const [usrRes, rsRes, contRes, prodRes, cmdRes] = await Promise.all([
+    sb.from('usuarios').select('*').order('nombre'),
     sb.from('razones_sociales').select('*').order('id'),
     sb.from('contactos').select('*').order('nombre'),
     sb.from('productos').select('*').order('nombre'),
@@ -165,13 +195,119 @@ async function loadFromSupabase() {
   if (prodRes.error) throw prodRes.error;
   if (cmdRes.error) throw cmdRes.error;
 
+  state.usuarios = (!usrRes.error && usrRes.data?.length) ? usrRes.data : SEED_USUARIOS;
   state.razonesSociales = rsRes.data.length ? rsRes.data : SEED_RAZONES_SOCIALES;
   state.contactos = contRes.data.length ? contRes.data : SEED_CONTACTOS;
-  state.productos = prodRes.data.length ? prodRes.data : SEED_PRODUCTOS;
+  state.productos = (prodRes.data.length ? prodRes.data : SEED_PRODUCTOS).map(p => ({ ...p, activo: p.activo !== false }));
   state.comandas = cmdRes.data.map(c => ({
     ...c,
     items: (c.comanda_items || []).sort((a, b) => a.linea - b.linea)
   }));
+}
+
+// ============================================================================
+// LOGIN Y SESIONES
+// ============================================================================
+function updateUserBadge() {
+  const badge = document.getElementById('user-badge-text');
+  badge.textContent = state.currentUser ? `${state.currentUser.nombre} (${state.currentUser.rol})` : 'Iniciar Sesión';
+}
+
+window.openLoginModal = function() {
+  const sel = document.getElementById('login-usuario');
+  const activos = state.usuarios.filter(u => u.activo !== false);
+  sel.innerHTML = activos.map(u => `<option value="${u.nombre}">${u.nombre} (${u.rol})</option>`).join('');
+  if (state.currentUser) sel.value = state.currentUser.nombre;
+  document.getElementById('login-pin').value = '';
+  document.getElementById('modal-login').classList.remove('hidden');
+};
+
+window.doLogin = async function() {
+  const nombre = document.getElementById('login-usuario').value;
+  const pin = document.getElementById('login-pin').value.trim();
+  const user = state.usuarios.find(u => u.nombre === nombre);
+
+  if (!user) return showToast('Selecciona un usuario válido.', true);
+  if (String(user.pin) !== String(pin)) {
+    return showToast('PIN incorrecto (por defecto es 1234).', true);
+  }
+
+  state.currentUser = user;
+  localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+  document.getElementById('modal-login').classList.add('hidden');
+  updateUserBadge();
+  await reserveNextOC(false);
+  showToast(`Sesión iniciada como ${user.nombre}`);
+};
+
+// ============================================================================
+// RESERVA ATÓMICA DE Nº DE PEDIDO (OC) PARA SESIONES SIMULTÁNEAS
+// ============================================================================
+window.reserveNextOC = async function(forceNew = false) {
+  if (state.editingComandaId) return; // No reservar si está editando un pedido existente
+
+  const usuarioNombre = state.currentUser?.nombre || 'Invitado';
+
+  if (state.isOnline && state.supabase) {
+    try {
+      if (forceNew) {
+        await state.supabase.rpc('liberar_reserva_oc', { p_session_id: state.sessionId });
+      }
+      const { data, error } = await state.supabase.rpc('reservar_siguiente_oc', {
+        p_session_id: state.sessionId,
+        p_usuario: usuarioNombre
+      });
+      if (!error && data && data.length > 0) {
+        state.reservedOC = data[0];
+        applyReservedOCUI();
+        return;
+      }
+    } catch (err) {
+      console.warn('RPC reservar_siguiente_oc no disponible, usando cálculo local:', err);
+    }
+  }
+
+  // Fallback Local (también soporta múltiples pestañas en el mismo navegador)
+  const now = Date.now();
+  let reservas = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESERVAS) || '[]').filter(r => r.expiresAt > now);
+  if (forceNew) {
+    reservas = reservas.filter(r => r.sessionId !== state.sessionId);
+  }
+  let mine = reservas.find(r => r.sessionId === state.sessionId);
+  if (!mine) {
+    const maxCmd = state.comandas.reduce((m, c) => Math.max(m, Number(c.numero_correlativo) || 0), 290);
+    const maxRes = reservas.reduce((m, r) => Math.max(m, Number(r.numero_correlativo) || 0), 290);
+    const nextNum = Math.max(maxCmd, maxRes, 290) + 1;
+    mine = { numero_correlativo: nextNum, oc: `ZRA-${nextNum}`, sessionId: state.sessionId, usuario: usuarioNombre, expiresAt: now + 30 * 60000 };
+    reservas.push(mine);
+  } else {
+    mine.expiresAt = now + 30 * 60000;
+  }
+  localStorage.setItem(STORAGE_KEYS.RESERVAS, JSON.stringify(reservas));
+  state.reservedOC = mine;
+  applyReservedOCUI();
+};
+
+function applyReservedOCUI() {
+  if (!state.reservedOC) return;
+  const oc = state.reservedOC.oc;
+  document.getElementById('cmd-oc').value = oc;
+  document.getElementById('next-oc-badge').textContent = `OC Reservada: ${oc}`;
+  const statusEl = document.getElementById('oc-reserva-status');
+  statusEl.textContent = `Reservado para ${state.currentUser?.nombre || 'tu sesión'}`;
+  statusEl.classList.remove('hidden');
+  updateDescriptorPreview();
+}
+
+async function releaseReservation() {
+  if (state.isOnline && state.supabase) {
+    try {
+      await state.supabase.rpc('liberar_reserva_oc', { p_session_id: state.sessionId });
+    } catch (_) {}
+  }
+  let reservas = JSON.parse(localStorage.getItem(STORAGE_KEYS.RESERVAS) || '[]');
+  reservas = reservas.filter(r => r.sessionId !== state.sessionId);
+  localStorage.setItem(STORAGE_KEYS.RESERVAS, JSON.stringify(reservas));
 }
 
 // ============================================================================
@@ -189,16 +325,6 @@ window.switchTab = function(tabId) {
   if (tabId === 'catalogo') renderCatalogo();
 };
 
-function getNextCorrelativo() {
-  const maxNum = state.comandas.reduce((max, c) => Math.max(max, Number(c.numero_correlativo) || 0), 290);
-  return maxNum + 1;
-}
-
-function updateNextOCBadge() {
-  const next = getNextCorrelativo();
-  document.getElementById('next-oc-badge').textContent = `Próxima OC: ZRA-${next}`;
-}
-
 function populateSelects() {
   const rsSelect = document.getElementById('cmd-razon-social');
   const contRsSelect = document.getElementById('new-cont-rs');
@@ -213,18 +339,22 @@ function populateSelects() {
   const dlContactos = document.getElementById('lista-contactos');
   dlContactos.innerHTML = state.contactos.map(c => `<option value="${c.nombre}">`).join('');
 
+  // Solo productos VISIBLES (activo !== false) aparecen al armar un pedido
   const dlProductos = document.getElementById('lista-productos');
-  dlProductos.innerHTML = state.productos.map(p => `<option value="${p.nombre}">`).join('');
+  dlProductos.innerHTML = state.productos
+    .filter(p => p.activo !== false)
+    .map(p => `<option value="${p.nombre}">`)
+    .join('');
 }
 
 // ============================================================================
-// FORMULARIO NUEVA COMANDA
+// FORMULARIO NUEVA COMANDA (Y EDICIÓN DE PEDIDOS)
 // ============================================================================
-window.resetComandaForm = function() {
-  const nextNum = getNextCorrelativo();
-  updateNextOCBadge();
+window.resetComandaForm = async function() {
+  state.editingComandaId = null;
+  document.getElementById('edit-mode-banner').classList.add('hidden');
+  document.getElementById('btn-save-comanda').textContent = 'Guardar y Agendar Comanda';
 
-  document.getElementById('cmd-oc').value = `ZRA-${nextNum}`;
   document.getElementById('cmd-fecha-pedido').value = todayISO();
   document.getElementById('cmd-fecha-entrega').value = tomorrowISO();
   document.getElementById('cmd-eta-hora').value = '12:00';
@@ -237,8 +367,53 @@ window.resetComandaForm = function() {
 
   document.getElementById('cmd-items-body').innerHTML = '';
   addItemRow();
+  await reserveNextOC(false);
   updateDescriptorPreview();
   recalcTotals();
+};
+
+window.cancelEditComanda = async function() {
+  await resetComandaForm();
+  showToast('Edición cancelada.');
+};
+
+window.editComanda = function(id) {
+  const c = state.comandas.find(x => x.id === id);
+  if (!c) return;
+
+  state.editingComandaId = id;
+  document.getElementById('edit-mode-banner').classList.remove('hidden');
+  document.getElementById('edit-oc-label').textContent = c.oc;
+  document.getElementById('oc-reserva-status').classList.add('hidden');
+  document.getElementById('btn-save-comanda').textContent = `Actualizar Pedido ${c.oc}`;
+
+  document.getElementById('cmd-oc').value = c.oc;
+  document.getElementById('cmd-fecha-pedido').value = c.fecha_pedido || todayISO();
+  document.getElementById('cmd-fecha-entrega').value = c.fecha_entrega || tomorrowISO();
+  const etaMatch = (c.hrs_entrega || '').match(/(\d{1,2}:\d{2})/);
+  document.getElementById('cmd-eta-hora').value = etaMatch ? etaMatch[1].padStart(5, '0') : '12:00';
+  document.getElementById('cmd-tipo-doc').value = c.tipo_documento || 'Factura';
+  document.getElementById('cmd-cliente').value = c.cliente_nombre || '';
+  document.getElementById('cmd-razon-social').value = c.razon_social_id || '';
+  document.getElementById('cmd-tipo-servicio').value = c.tipo_servicio || 'Servicio';
+  document.getElementById('cmd-tip-serv').value = c.tip_serv || '';
+  document.getElementById('cmd-obs').value = c.obs || '';
+
+  const body = document.getElementById('cmd-items-body');
+  body.innerHTML = '';
+  (c.items || []).forEach(it => {
+    addItemRow({
+      txt: it.txt,
+      ume: it.ume,
+      pxq: it.pxq,
+      qty: (it.ume === 'kg' || it.ume === 'g') && it.peso ? it.peso : it.qty
+    });
+  });
+
+  updateDescriptorPreview();
+  recalcTotals();
+  switchTab('nueva-comanda');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
 window.onClienteChange = function() {
@@ -267,7 +442,6 @@ window.updateDescriptorPreview = function() {
   const descriptor = `${tipoServ} ${textoFecha} ${oc} ${obs} ${eta}`.replace(/\s+/g, ' ').trim();
   document.getElementById('cmd-descriptor-preview').textContent = descriptor;
 
-  // Actualizar datos de confirmación en el Resumen
   const cliente = document.getElementById('cmd-cliente').value.trim();
   const tipoDoc = document.getElementById('cmd-tipo-doc').value;
   document.getElementById('sum-oc-badge').textContent = oc || 'ZRA-';
@@ -279,7 +453,6 @@ window.updateDescriptorPreview = function() {
 
 window.quickAddItem = function(txt, pxq, ume) {
   const rows = document.querySelectorAll('#cmd-items-body .item-row');
-  // Si la primera fila está vacía, reutilizarla en vez de crear una extra
   if (rows.length === 1 && !rows[0].querySelector('.item-txt').value.trim()) {
     rows[0].querySelector('.item-txt').value = txt;
     rows[0].querySelector('.item-pxq').value = pxq;
@@ -335,16 +508,23 @@ window.addItemRow = function(prefill = {}, autoFocus = false) {
   const pxqInput = card.querySelector('.item-pxq');
   const qtyInput = card.querySelector('.item-qty');
 
-  txtInput.addEventListener('input', () => {
-    const prod = state.productos.find(p => p.nombre.toLowerCase() === txtInput.value.trim().toLowerCase());
+  const handleTxtChange = () => {
+    const prod = state.productos.find(p => p.activo !== false && p.nombre.toLowerCase() === txtInput.value.trim().toLowerCase());
     if (prod) {
       pxqInput.value = prod.pxq;
       umeInput.value = prod.ume;
     }
     recalcTotals();
+  };
+
+  txtInput.addEventListener('input', handleTxtChange);
+  txtInput.addEventListener('change', handleTxtChange);
+
+  [pxqInput, qtyInput, umeInput].forEach(el => {
+    el.addEventListener('input', recalcTotals);
+    el.addEventListener('change', recalcTotals);
   });
 
-  [pxqInput, qtyInput, umeInput].forEach(el => el.addEventListener('input', recalcTotals));
   card.querySelector('.btn-del-row').addEventListener('click', () => {
     card.remove();
     recalcTotals();
@@ -352,9 +532,7 @@ window.addItemRow = function(prefill = {}, autoFocus = false) {
 
   container.appendChild(card);
   recalcTotals();
-  if (autoFocus) {
-    txtInput.focus();
-  }
+  if (autoFocus) txtInput.focus();
 };
 
 function recalcTotals() {
@@ -443,8 +621,7 @@ window.copyResumenWhatsApp = function() {
   }).filter(Boolean);
 
   if (lineas.length === 0) {
-    showToast('Agrega al menos un producto para copiar el resumen.', true);
-    return;
+    return showToast('Agrega al menos un producto para copiar el resumen.', true);
   }
 
   const msg = [
@@ -474,8 +651,7 @@ window.saveComanda = async function() {
   const hora = document.getElementById('cmd-eta-hora').value;
 
   if (!oc || !cliente || !fechaEntrega) {
-    showToast('Completa OC, Cliente y Fecha de entrega.', true);
-    return;
+    return showToast('Completa OC, Cliente y Fecha de entrega.', true);
   }
 
   const rows = Array.from(document.querySelectorAll('#cmd-items-body .item-row'));
@@ -499,24 +675,21 @@ window.saveComanda = async function() {
   }).filter(it => it.txt !== '');
 
   if (items.length === 0) {
-    showToast('Agrega al menos un producto a la comanda.', true);
-    return;
+    return showToast('Agrega al menos un producto a la comanda.', true);
   }
 
   const matchNum = oc.match(/(\d+)$/);
-  const numeroCorrelativo = matchNum ? parseInt(matchNum[1], 10) : getNextCorrelativo();
+  const numeroCorrelativo = matchNum ? parseInt(matchNum[1], 10) : 291;
   const rsIdVal = document.getElementById('cmd-razon-social').value;
   const tipoServicio = document.getElementById('cmd-tipo-servicio').value;
   const obs = document.getElementById('cmd-obs').value.trim();
   const hrsEntrega = hora ? `ETA ${hora} HRS` : '';
   const textoFecha = formatTextoFecha(fechaEntrega);
   const descriptorServicio = `${tipoServicio} ${textoFecha} ${oc} ${obs} ${hrsEntrega}`.replace(/\s+/g, ' ').trim();
-
   const totalValor = items.reduce((s, i) => s + i.valor, 0);
   const totalRedondeado = items.reduce((s, i) => s + i.redondeo, 0);
 
-  const nuevaComanda = {
-    id: Date.now(),
+  const payload = {
     numero_correlativo: numeroCorrelativo,
     oc,
     fecha_pedido: fechaPedido,
@@ -531,41 +704,63 @@ window.saveComanda = async function() {
     texto_fecha: textoFecha,
     descriptor_servicio: descriptorServicio,
     tipo_documento: document.getElementById('cmd-tipo-doc').value,
+    total_valor: totalValor,
+    total_redondeado: totalRedondeado,
+    creado_por: state.currentUser?.nombre || 'Sistema'
+  };
+
+  if (state.editingComandaId) {
+    // ACTUALIZAR PEDIDO EXISTENTE
+    const editId = state.editingComandaId;
+    if (state.isOnline && state.supabase) {
+      const { error } = await state.supabase.from('comandas').update(payload).eq('id', editId);
+      if (error) return showToast('Error actualizando pedido: ' + error.message, true);
+      await state.supabase.from('comanda_items').delete().eq('comanda_id', editId);
+      const { error: iErr } = await state.supabase.from('comanda_items').insert(items.map(it => ({ ...it, comanda_id: editId })));
+      if (iErr) return showToast('Error guardando ítems: ' + iErr.message, true);
+    }
+
+    const idx = state.comandas.findIndex(c => c.id === editId);
+    if (idx !== -1) {
+      state.comandas[idx] = { ...state.comandas[idx], ...payload, items };
+    }
+    saveLocal();
+    showToast(`Pedido ${oc} actualizado.`);
+    await resetComandaForm();
+    switchTab('historial');
+    return;
+  }
+
+  // CREAR NUEVO PEDIDO
+  const nuevaComanda = {
+    id: Date.now(),
+    ...payload,
     estado_produccion: 'Agendado',
     emision_dte: 'Pendiente',
     dte: null,
     estado_pago: 'Pendiente',
-    total_valor: totalValor,
-    total_redondeado: totalRedondeado,
     items
   };
 
   if (state.isOnline && state.supabase) {
     try {
       const { items: cmdItems, id: _omit, ...cabecera } = nuevaComanda;
-      const { data: inserted, error } = await state.supabase
-        .from('comandas')
-        .insert(cabecera)
-        .select()
-        .single();
+      const { data: inserted, error } = await state.supabase.from('comandas').insert(cabecera).select().single();
       if (error) throw error;
-
-      const itemsToInsert = cmdItems.map(it => ({ ...it, comanda_id: inserted.id }));
-      const { error: itemsErr } = await state.supabase.from('comanda_items').insert(itemsToInsert);
+      const { error: itemsErr } = await state.supabase.from('comanda_items').insert(cmdItems.map(it => ({ ...it, comanda_id: inserted.id })));
       if (itemsErr) throw itemsErr;
-
       nuevaComanda.id = inserted.id;
     } catch (err) {
       console.error(err);
-      showToast('Error al guardar en Supabase: ' + err.message, true);
-      return;
+      return showToast('Error al guardar en Supabase: ' + err.message, true);
     }
   }
 
+  await releaseReservation();
   state.comandas.unshift(nuevaComanda);
   saveLocal();
   showToast(`Comanda ${oc} guardada y agendada.`);
-  resetComandaForm();
+  await resetComandaForm();
   switchTab('agenda');
 };
 
@@ -590,7 +785,6 @@ window.renderAgenda = function() {
     return true;
   });
 
-  // Ordenar por fecha_entrega asc y luego ETA
   list.sort((a, b) => {
     if (a.fecha_entrega !== b.fecha_entrega) return (a.fecha_entrega || '').localeCompare(b.fecha_entrega || '');
     return (a.hrs_entrega || '').localeCompare(b.hrs_entrega || '');
@@ -601,7 +795,6 @@ window.renderAgenda = function() {
     return;
   }
 
-  // Agrupar por fecha_entrega
   const groups = {};
   list.forEach(c => {
     const key = c.fecha_entrega || 'Sin fecha';
@@ -665,9 +858,7 @@ function renderAgendaCard(c) {
             <option value="En Producción" ${c.estado_produccion === 'En Producción' ? 'selected' : ''}>En Producción</option>
             <option value="Entregado" ${c.estado_produccion === 'Entregado' ? 'selected' : ''}>Entregado</option>
           </select>
-          <button onclick="printComanda(${c.id})" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold">
-            Ticket
-          </button>
+          <button onclick="printComanda(${c.id})" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold">Ticket</button>
         </div>
       </div>
     </div>
@@ -678,7 +869,6 @@ window.updateComandaEstado = async function(id, nuevoEstado) {
   const c = state.comandas.find(x => x.id === id);
   if (!c) return;
   c.estado_produccion = nuevoEstado;
-
   if (state.isOnline && state.supabase) {
     await state.supabase.from('comandas').update({ estado_produccion: nuevoEstado }).eq('id', id);
   }
@@ -724,10 +914,9 @@ window.printComanda = function(id) {
 };
 
 // ============================================================================
-// HISTORIAL, DTE, PAGOS Y EXPORTACIÓN CSV
+// HISTORIAL, MANTENEDOR DE PEDIDOS, DTE, PAGOS Y EXPORTACIÓN CSV
 // ============================================================================
 window.renderHistorial = function() {
-  // 1. Resumen de deuda por Razón Social
   const resumenDiv = document.getElementById('resumen-razon-social');
   const totalsByRS = {};
   state.razonesSociales.forEach(rs => { totalsByRS[rs.id] = 0; });
@@ -749,14 +938,12 @@ window.renderHistorial = function() {
     `;
   }).join('');
 
-  // 2. Tabla de Comandas
   const search = document.getElementById('hist-search').value.trim().toLowerCase();
   const tbody = document.getElementById('historial-body');
   const filtered = state.comandas.filter(c => {
     if (!search) return true;
     const rs = state.razonesSociales.find(r => r.id === c.razon_social_id);
-    const txt = `${c.oc} ${c.dte || ''} ${c.cliente_nombre} ${rs?.razon_social || ''}`.toLowerCase();
-    return txt.includes(search);
+    return `${c.oc} ${c.dte || ''} ${c.cliente_nombre} ${rs?.razon_social || ''}`.toLowerCase().includes(search);
   });
 
   tbody.innerHTML = filtered.map(c => {
@@ -787,12 +974,28 @@ window.renderHistorial = function() {
             <option value="PAGO" ${c.estado_pago === 'PAGO' ? 'selected' : ''}>PAGO</option>
           </select>
         </td>
-        <td class="py-2.5 pl-2 text-right">
+        <td class="py-2.5 pl-2 text-right whitespace-nowrap space-x-1.5">
           <button onclick="printComanda(${c.id})" class="text-xs font-semibold text-slate-600 hover:text-slate-900 underline">Ver</button>
+          <button onclick="editComanda(${c.id})" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 underline">Editar</button>
+          <button onclick="deleteComanda(${c.id})" class="text-xs font-semibold text-rose-600 hover:text-rose-800 underline">Eliminar</button>
         </td>
       </tr>
     `;
   }).join('');
+};
+
+window.deleteComanda = async function(id) {
+  const c = state.comandas.find(x => x.id === id);
+  if (!c || !confirm(`¿Eliminar definitivamente el pedido ${c.oc}?`)) return;
+  if (state.isOnline && state.supabase) {
+    const { error } = await state.supabase.from('comandas').delete().eq('id', id);
+    if (error) return showToast(error.message, true);
+  }
+  state.comandas = state.comandas.filter(x => x.id !== id);
+  saveLocal();
+  renderHistorial();
+  renderAgenda();
+  showToast(`Pedido ${c.oc} eliminado.`);
 };
 
 window.updateDTE = async function(id, dteVal) {
@@ -877,84 +1080,363 @@ window.exportToCSV = function() {
 };
 
 // ============================================================================
-// CATÁLOGO Y CLIENTES
+// MANTENEDORES: PRODUCTOS (VISIBLE/OCULTO), CLIENTES, RAZONES SOCIALES, USUARIOS
 // ============================================================================
-function renderCatalogo() {
+window.renderCatalogo = function() {
+  // 1. Productos
+  const qProd = (document.getElementById('search-mant-prod')?.value || '').trim().toLowerCase();
   const prodList = document.getElementById('catalogo-productos-list');
-  prodList.innerHTML = state.productos.map(p => `
-    <div class="py-2 flex justify-between items-center">
-      <div>
-        <div class="font-semibold text-slate-900">${p.nombre}</div>
-        <div class="text-[11px] text-slate-500">${p.categoria || 'General'} • ${p.ume}</div>
-      </div>
-      <div class="font-bold text-amber-700">${formatCLP(p.pxq)}</div>
-    </div>
-  `).join('');
+  const prodsFiltered = state.productos.filter(p => !qProd || p.nombre.toLowerCase().includes(qProd));
 
-  const contList = document.getElementById('catalogo-contactos-list');
-  contList.innerHTML = state.contactos.map(c => {
-    const rs = state.razonesSociales.find(r => r.id === c.razon_social_id);
+  prodList.innerHTML = prodsFiltered.map(p => {
+    const visible = p.activo !== false;
     return `
-      <div class="py-2 flex justify-between items-center">
-        <div>
-          <div class="font-semibold text-slate-900">${c.nombre}</div>
-          <div class="text-[11px] text-slate-500">${rs ? rs.razon_social : 'Particular'} • ${c.destino_habitual || '-'}</div>
+      <div class="py-2 flex items-center justify-between gap-2 ${visible ? '' : 'opacity-60'}">
+        <div class="min-w-0 flex-1">
+          <div class="font-semibold text-slate-900 truncate">${p.nombre}</div>
+          <div class="text-[11px] text-slate-500">${p.ume} • <strong class="text-amber-700">${formatCLP(p.pxq)}</strong></div>
+        </div>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button onclick="toggleProductoActivo(${p.id})" class="px-2 py-0.5 rounded-full text-[11px] font-bold border transition ${visible ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200'}">
+            ${visible ? 'Visible' : 'Oculto'}
+          </button>
+          <button onclick="editProducto(${p.id})" class="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold">Editar</button>
+          <button onclick="deleteProducto(${p.id})" class="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold">&times;</button>
         </div>
       </div>
     `;
   }).join('');
-}
 
-window.addProducto = async function() {
+  // 2. Contactos
+  const qCont = (document.getElementById('search-mant-cont')?.value || '').trim().toLowerCase();
+  const contList = document.getElementById('catalogo-contactos-list');
+  const contsFiltered = state.contactos.filter(c => !qCont || c.nombre.toLowerCase().includes(qCont));
+
+  contList.innerHTML = contsFiltered.map(c => {
+    const rs = state.razonesSociales.find(r => r.id === c.razon_social_id);
+    return `
+      <div class="py-2 flex items-center justify-between gap-2">
+        <div class="min-w-0 flex-1">
+          <div class="font-semibold text-slate-900 truncate">${c.nombre}</div>
+          <div class="text-[11px] text-slate-500 truncate">${rs ? rs.razon_social : 'Particular'} • ${c.destino_habitual || '-'}</div>
+        </div>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button onclick="editContacto(${c.id})" class="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold">Editar</button>
+          <button onclick="deleteContacto(${c.id})" class="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold">&times;</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // 3. Razones Sociales
+  const rsList = document.getElementById('catalogo-rs-list');
+  rsList.innerHTML = state.razonesSociales.map(rs => `
+    <div class="py-2 flex items-center justify-between gap-2">
+      <div class="min-w-0 flex-1">
+        <div class="font-semibold text-slate-900 truncate">${rs.razon_social}</div>
+        <div class="text-[11px] text-slate-500">ID ${rs.id} • RUT: ${rs.rut || 'Sin RUT'}</div>
+      </div>
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button onclick="editRazonSocial(${rs.id})" class="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold">Editar</button>
+        <button onclick="deleteRazonSocial(${rs.id})" class="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold">&times;</button>
+      </div>
+    </div>
+  `).join('');
+
+  // 4. Usuarios
+  const usrList = document.getElementById('catalogo-usuarios-list');
+  usrList.innerHTML = state.usuarios.map(u => `
+    <div class="py-2 flex items-center justify-between gap-2">
+      <div class="min-w-0 flex-1">
+        <div class="font-semibold text-slate-900 truncate">${u.nombre}</div>
+        <div class="text-[11px] text-slate-500">Rol: ${u.rol} • PIN: ${u.pin}</div>
+      </div>
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button onclick="editUsuario(${u.id})" class="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold">Editar</button>
+        <button onclick="deleteUsuario(${u.id})" class="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold">&times;</button>
+      </div>
+    </div>
+  `).join('');
+};
+
+// --- CRUD PRODUCTOS ---
+window.saveProducto = async function() {
+  const editId = document.getElementById('edit-prod-id').value;
   const nombre = document.getElementById('new-prod-nombre').value.trim();
   const pxq = Number(document.getElementById('new-prod-pxq').value) || 0;
   const ume = document.getElementById('new-prod-ume').value;
-  if (!nombre) return;
+  if (!nombre) return showToast('Ingresa el nombre del producto.', true);
 
-  const prod = { id: Date.now(), nombre, pxq, ume, categoria: 'Personalizado' };
-  if (state.isOnline && state.supabase) {
-    const { id: _omit, ...payload } = prod;
-    const { data, error } = await state.supabase.from('productos').insert(payload).select().single();
-    if (error) return showToast(error.message, true);
-    prod.id = data.id;
+  if (editId) {
+    const idNum = Number(editId);
+    const p = state.productos.find(x => x.id === idNum);
+    if (!p) return;
+    if (state.isOnline && state.supabase) {
+      const { error } = await state.supabase.from('productos').update({ nombre, pxq, ume }).eq('id', idNum);
+      if (error) return showToast(error.message, true);
+    }
+    p.nombre = nombre; p.pxq = pxq; p.ume = ume;
+    showToast('Producto actualizado.');
+  } else {
+    const prod = { id: Date.now(), nombre, pxq, ume, categoria: 'Personalizado', activo: true };
+    if (state.isOnline && state.supabase) {
+      const { id: _omit, ...payload } = prod;
+      const { data, error } = await state.supabase.from('productos').insert(payload).select().single();
+      if (error) return showToast(error.message, true);
+      prod.id = data.id;
+    }
+    state.productos.push(prod);
+    showToast('Producto creado.');
   }
 
-  state.productos.push(prod);
+  cancelEditProducto();
   saveLocal();
   populateSelects();
   renderCatalogo();
-  document.getElementById('new-prod-nombre').value = '';
-  document.getElementById('new-prod-pxq').value = '';
-  showToast('Producto agregado al catálogo.');
 };
 
-window.addContacto = async function() {
+window.editProducto = function(id) {
+  const p = state.productos.find(x => x.id === id);
+  if (!p) return;
+  document.getElementById('edit-prod-id').value = p.id;
+  document.getElementById('new-prod-nombre').value = p.nombre;
+  document.getElementById('new-prod-pxq').value = p.pxq;
+  document.getElementById('new-prod-ume').value = p.ume;
+  document.getElementById('btn-cancel-prod').classList.remove('hidden');
+};
+
+window.cancelEditProducto = function() {
+  document.getElementById('edit-prod-id').value = '';
+  document.getElementById('new-prod-nombre').value = '';
+  document.getElementById('new-prod-pxq').value = '';
+  document.getElementById('btn-cancel-prod').classList.add('hidden');
+};
+
+window.toggleProductoActivo = async function(id) {
+  const p = state.productos.find(x => x.id === id);
+  if (!p) return;
+  const nuevo = !(p.activo !== false);
+  if (state.isOnline && state.supabase) {
+    const { error } = await state.supabase.from('productos').update({ activo: nuevo }).eq('id', id);
+    if (error) return showToast(error.message, true);
+  }
+  p.activo = nuevo;
+  saveLocal();
+  populateSelects();
+  renderCatalogo();
+  showToast(`${p.nombre}: ${nuevo ? 'Visible en pedidos' : 'Oculto en pedidos'}`);
+};
+
+window.deleteProducto = async function(id) {
+  const p = state.productos.find(x => x.id === id);
+  if (!p || !confirm(`¿Eliminar "${p.nombre}" del catálogo?`)) return;
+  if (state.isOnline && state.supabase) {
+    const { error } = await state.supabase.from('productos').delete().eq('id', id);
+    if (error) return showToast(error.message, true);
+  }
+  state.productos = state.productos.filter(x => x.id !== id);
+  saveLocal();
+  populateSelects();
+  renderCatalogo();
+  showToast('Producto eliminado.');
+};
+
+// --- CRUD CONTACTOS ---
+window.saveContacto = async function() {
+  const editId = document.getElementById('edit-cont-id').value;
   const nombre = document.getElementById('new-cont-nombre').value.trim();
   const rsVal = document.getElementById('new-cont-rs').value;
   const destino = document.getElementById('new-cont-destino').value.trim();
-  if (!nombre) return;
+  if (!nombre) return showToast('Ingresa el nombre del contacto.', true);
 
-  const cont = {
-    id: Date.now(),
-    nombre,
-    razon_social_id: rsVal ? parseInt(rsVal, 10) : null,
-    destino_habitual: destino,
-    despacho_habitual: 0
-  };
-  if (state.isOnline && state.supabase) {
-    const { id: _omit, ...payload } = cont;
-    const { data, error } = await state.supabase.from('contactos').insert(payload).select().single();
-    if (error) return showToast(error.message, true);
-    cont.id = data.id;
+  const rsId = rsVal ? parseInt(rsVal, 10) : null;
+  if (editId) {
+    const idNum = Number(editId);
+    const c = state.contactos.find(x => x.id === idNum);
+    if (!c) return;
+    if (state.isOnline && state.supabase) {
+      const { error } = await state.supabase.from('contactos').update({ nombre, razon_social_id: rsId, destino_habitual: destino }).eq('id', idNum);
+      if (error) return showToast(error.message, true);
+    }
+    c.nombre = nombre; c.razon_social_id = rsId; c.destino_habitual = destino;
+    showToast('Contacto actualizado.');
+  } else {
+    const cont = { id: Date.now(), nombre, razon_social_id: rsId, destino_habitual: destino, despacho_habitual: 0 };
+    if (state.isOnline && state.supabase) {
+      const { id: _omit, ...payload } = cont;
+      const { data, error } = await state.supabase.from('contactos').insert(payload).select().single();
+      if (error) return showToast(error.message, true);
+      cont.id = data.id;
+    }
+    state.contactos.push(cont);
+    showToast('Contacto creado.');
   }
 
-  state.contactos.push(cont);
+  cancelEditContacto();
   saveLocal();
   populateSelects();
   renderCatalogo();
+};
+
+window.editContacto = function(id) {
+  const c = state.contactos.find(x => x.id === id);
+  if (!c) return;
+  document.getElementById('edit-cont-id').value = c.id;
+  document.getElementById('new-cont-nombre').value = c.nombre;
+  document.getElementById('new-cont-rs').value = c.razon_social_id || '';
+  document.getElementById('new-cont-destino').value = c.destino_habitual || '';
+  document.getElementById('btn-cancel-cont').classList.remove('hidden');
+};
+
+window.cancelEditContacto = function() {
+  document.getElementById('edit-cont-id').value = '';
   document.getElementById('new-cont-nombre').value = '';
+  document.getElementById('new-cont-rs').value = '';
   document.getElementById('new-cont-destino').value = '';
-  showToast('Contacto guardado.');
+  document.getElementById('btn-cancel-cont').classList.add('hidden');
+};
+
+window.deleteContacto = async function(id) {
+  const c = state.contactos.find(x => x.id === id);
+  if (!c || !confirm(`¿Eliminar contacto "${c.nombre}"?`)) return;
+  if (state.isOnline && state.supabase) {
+    const { error } = await state.supabase.from('contactos').delete().eq('id', id);
+    if (error) return showToast(error.message, true);
+  }
+  state.contactos = state.contactos.filter(x => x.id !== id);
+  saveLocal();
+  populateSelects();
+  renderCatalogo();
+  showToast('Contacto eliminado.');
+};
+
+// --- CRUD RAZONES SOCIALES ---
+window.saveRazonSocial = async function() {
+  const editId = document.getElementById('edit-rs-id').value;
+  const rut = document.getElementById('new-rs-rut').value.trim();
+  const razon_social = document.getElementById('new-rs-nombre').value.trim();
+  if (!razon_social) return showToast('Ingresa la Razón Social.', true);
+
+  if (editId) {
+    const idNum = Number(editId);
+    const rs = state.razonesSociales.find(x => x.id === idNum);
+    if (!rs) return;
+    if (state.isOnline && state.supabase) {
+      const { error } = await state.supabase.from('razones_sociales').update({ rut, razon_social }).eq('id', idNum);
+      if (error) return showToast(error.message, true);
+    }
+    rs.rut = rut; rs.razon_social = razon_social;
+    showToast('Razón Social actualizada.');
+  } else {
+    const nextId = state.razonesSociales.reduce((m, r) => Math.max(m, Number(r.id) || 0), 15) + 1;
+    const rs = { id: nextId, rut, razon_social, contacto_principal: '' };
+    if (state.isOnline && state.supabase) {
+      const { error } = await state.supabase.from('razones_sociales').insert(rs);
+      if (error) return showToast(error.message, true);
+    }
+    state.razonesSociales.push(rs);
+    showToast('Razón Social creada.');
+  }
+
+  cancelEditRazonSocial();
+  saveLocal();
+  populateSelects();
+  renderCatalogo();
+};
+
+window.editRazonSocial = function(id) {
+  const rs = state.razonesSociales.find(x => x.id === id);
+  if (!rs) return;
+  document.getElementById('edit-rs-id').value = rs.id;
+  document.getElementById('new-rs-rut').value = rs.rut || '';
+  document.getElementById('new-rs-nombre').value = rs.razon_social;
+  document.getElementById('btn-cancel-rs').classList.remove('hidden');
+};
+
+window.cancelEditRazonSocial = function() {
+  document.getElementById('edit-rs-id').value = '';
+  document.getElementById('new-rs-rut').value = '';
+  document.getElementById('new-rs-nombre').value = '';
+  document.getElementById('btn-cancel-rs').classList.add('hidden');
+};
+
+window.deleteRazonSocial = async function(id) {
+  const rs = state.razonesSociales.find(x => x.id === id);
+  if (!rs || !confirm(`¿Eliminar "${rs.razon_social}"?`)) return;
+  if (state.isOnline && state.supabase) {
+    const { error } = await state.supabase.from('razones_sociales').delete().eq('id', id);
+    if (error) return showToast(error.message, true);
+  }
+  state.razonesSociales = state.razonesSociales.filter(x => x.id !== id);
+  saveLocal();
+  populateSelects();
+  renderCatalogo();
+  showToast('Razón Social eliminada.');
+};
+
+// --- CRUD USUARIOS ---
+window.saveUsuario = async function() {
+  const editId = document.getElementById('edit-usr-id').value;
+  const nombre = document.getElementById('new-usr-nombre').value.trim();
+  const pin = document.getElementById('new-usr-pin').value.trim() || '1234';
+  const rol = document.getElementById('new-usr-rol').value;
+  if (!nombre) return showToast('Ingresa el nombre del usuario.', true);
+
+  if (editId) {
+    const idNum = Number(editId);
+    const u = state.usuarios.find(x => x.id === idNum);
+    if (!u) return;
+    if (state.isOnline && state.supabase) {
+      const { error } = await state.supabase.from('usuarios').update({ nombre, pin, rol }).eq('id', idNum);
+      if (error) return showToast(error.message, true);
+    }
+    u.nombre = nombre; u.pin = pin; u.rol = rol;
+    showToast('Usuario actualizado.');
+  } else {
+    const usr = { id: Date.now(), nombre, pin, rol, activo: true };
+    if (state.isOnline && state.supabase) {
+      const { id: _omit, ...payload } = usr;
+      const { data, error } = await state.supabase.from('usuarios').insert(payload).select().single();
+      if (error) return showToast(error.message, true);
+      usr.id = data.id;
+    }
+    state.usuarios.push(usr);
+    showToast('Usuario creado.');
+  }
+
+  cancelEditUsuario();
+  saveLocal();
+  renderCatalogo();
+};
+
+window.editUsuario = function(id) {
+  const u = state.usuarios.find(x => x.id === id);
+  if (!u) return;
+  document.getElementById('edit-usr-id').value = u.id;
+  document.getElementById('new-usr-nombre').value = u.nombre;
+  document.getElementById('new-usr-pin').value = u.pin;
+  document.getElementById('new-usr-rol').value = u.rol;
+  document.getElementById('btn-cancel-usr').classList.remove('hidden');
+};
+
+window.cancelEditUsuario = function() {
+  document.getElementById('edit-usr-id').value = '';
+  document.getElementById('new-usr-nombre').value = '';
+  document.getElementById('new-usr-pin').value = '';
+  document.getElementById('btn-cancel-usr').classList.add('hidden');
+};
+
+window.deleteUsuario = async function(id) {
+  const u = state.usuarios.find(x => x.id === id);
+  if (!u || !confirm(`¿Eliminar usuario "${u.nombre}"?`)) return;
+  if (state.isOnline && state.supabase) {
+    const { error } = await state.supabase.from('usuarios').delete().eq('id', id);
+    if (error) return showToast(error.message, true);
+  }
+  state.usuarios = state.usuarios.filter(x => x.id !== id);
+  saveLocal();
+  renderCatalogo();
+  showToast('Usuario eliminado.');
 };
 
 // ============================================================================
@@ -981,7 +1463,7 @@ window.recalcDespacho = function() {
 
   const valorHora = sueldo / 176;
   const costoHH = valorHora * (minutos / 60);
-  const valorKm = (bencina / kml) * 1.2; // factor mantención/desgaste similar a tu hoja (130 -> 156)
+  const valorKm = (bencina / kml) * 1.2;
   const costoTraslado = valorKm * km;
   const subtotal = (costoHH + costoTraslado) * (1 + margen);
   const conIva = subtotal * 1.19;
@@ -1004,10 +1486,7 @@ window.insertDespachoFromCalc = function() {
 window.saveSupabaseConfig = async function() {
   const url = document.getElementById('cfg-sb-url').value.trim();
   const key = document.getElementById('cfg-sb-key').value.trim();
-  if (!url || !key) {
-    showToast('Ingresa ambos campos de Supabase.', true);
-    return;
-  }
+  if (!url || !key) return showToast('Ingresa ambos campos de Supabase.', true);
 
   localStorage.setItem(STORAGE_KEYS.SB_URL, url);
   localStorage.setItem(STORAGE_KEYS.SB_KEY, key);
@@ -1017,7 +1496,7 @@ window.saveSupabaseConfig = async function() {
     await loadFromSupabase();
     setConnectionBadge(true);
     populateSelects();
-    resetComandaForm();
+    await resetComandaForm();
     renderAgenda();
     renderHistorial();
     renderCatalogo();
@@ -1030,10 +1509,7 @@ window.saveSupabaseConfig = async function() {
 };
 
 window.syncLocalToSupabase = async function() {
-  if (!state.supabase) {
-    showToast('Primero guarda y conecta tu URL y Key de Supabase.', true);
-    return;
-  }
+  if (!state.supabase) return showToast('Primero guarda y conecta tu URL y Key de Supabase.', true);
   const localCmds = JSON.parse(localStorage.getItem(STORAGE_KEYS.COMANDAS) || '[]');
   let count = 0;
 
@@ -1054,14 +1530,14 @@ window.syncLocalToSupabase = async function() {
   showToast(`Sincronización lista: ${count} comandas nuevas subidas a Supabase.`);
 };
 
-window.disconnectSupabase = function() {
+window.disconnectSupabase = async function() {
   localStorage.removeItem(STORAGE_KEYS.SB_URL);
   localStorage.removeItem(STORAGE_KEYS.SB_KEY);
   state.supabase = null;
   loadFromLocal();
   setConnectionBadge(false);
   populateSelects();
-  resetComandaForm();
+  await resetComandaForm();
   renderAgenda();
   renderHistorial();
   renderCatalogo();
